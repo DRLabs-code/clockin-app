@@ -36,6 +36,8 @@ const zh = {
   errInput: '请填写完整信息',
   errTime: '时间格式应为 2026-10-26 07:00，且下班晚于上班',
   errGeneric: '出错了，请重试',
+  loadFail: '加载失败，请重试',
+  retry: '重试',
   err: {
     code: '团队码不存在',
     pin: 'PIN 不正确，或格式须为 4 位数字',

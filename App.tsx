@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Linking, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { data, Session } from './src/data';
@@ -11,13 +11,13 @@ import WorkerScreen from './src/Worker';
 export default function App() {
   const [session, setSession] = useState<Session | null | undefined>(undefined);
   useEffect(() => {
-    data.getSession().then(setSession);
+    data.getSession().then(setSession, () => setSession(null));
     Linking.getInitialURL().then((u) => setScanned(parseSite(u))); // opened from a site QR code
   }, []);
-  const logout = async () => {
-    await data.clearSession();
+  const logout = useCallback(async () => {
+    await data.clearSession().catch(() => {});
     setSession(null);
-  };
+  }, []);
   const key = session === undefined ? 'load' : session === null ? 'auth' : session.role + session.workerId;
 
   return (

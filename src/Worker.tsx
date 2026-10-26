@@ -71,20 +71,31 @@ export default function WorkerScreen({ session, onLogout }: { session: Session; 
   const [edit, setEdit] = useState<{ inId: string; outId: string | null; newIn: string; newOut: string; reason: string }>();
   const lastKey = `clockin.lastSite.${session.workerId}`;
 
+  const alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  const [failed, setFailed] = useState(false);
   const load = useCallback(async () => {
     const code = session.teamCode;
-    await data.sweep(code);
-    const [tm, ws, ss, ps, cs] = await Promise.all([
-      data.getTeam(code), data.listWorkers(code), data.listSites(code),
-      data.listPunches(code, weekStart(0) - 2 * DAY, Date.now() + DAY), data.listCorrections(code),
-    ]);
-    setTeam(tm);
-    setMe(ws.find((w) => w.id === session.workerId));
-    setSites(ss);
-    setPunches(ps.filter((p) => p.workerId === session.workerId));
-    setCorr(cs.filter((c) => c.workerId === session.workerId));
-    setLoaded(true);
-  }, [session]);
+    try {
+      await data.sweep(code).catch(() => 0);
+      const [tm, ws, ss, ps, cs] = await Promise.all([
+        data.getTeam(code), data.listWorkers(code), data.listSites(code),
+        data.listPunches(code, weekStart(0) - 2 * DAY, Date.now() + DAY), data.listCorrections(code),
+      ]);
+      if (!alive.current) return;
+      setTeam(tm);
+      setMe(ws.find((w) => w.id === session.workerId));
+      setSites(ss);
+      setPunches(ps.filter((p) => p.workerId === session.workerId));
+      setCorr(cs.filter((c) => c.workerId === session.workerId));
+      setLoaded(true);
+      setFailed(false);
+    } catch (e) {
+      if (!alive.current) return;
+      if (e instanceof Error && (e.message === 'code' || e.message === 'notfound')) { onLogout(); return; }
+      setFailed(true);
+    }
+  }, [session, onLogout]);
 
   useEffect(() => { load(); const id = setInterval(load, 20_000); return () => clearInterval(id); }, [load]);
 
@@ -99,6 +110,7 @@ export default function WorkerScreen({ session, onLogout }: { session: Session; 
     })();
   }, [sites, siteId, lastKey, session.teamCode]);
 
+  if (failed && (!loaded || !team)) return <ScrollView contentContainerStyle={st.body}><Card><Text style={st.muted}>{t.loadFail}</Text><Btn label={t.retry} onPress={load} /></Card></ScrollView>;
   if (!loaded || !team) return <ScrollView contentContainerStyle={st.body}><Skeleton n={1} h={40} /><Skeleton n={1} h={232} /><Skeleton n={2} /></ScrollView>;
 
   if (me?.status !== 'approved')

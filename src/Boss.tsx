@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, Switch, Text, View } from 'react-native';
 import { Approval, Audit, Correction, data, Punch, Session, Settings, Site, Team, Worker } from './data';
 import { DAY, fmtDate, fmtDT, fmtTime, parseDT, shiftsOf, Shift, startOfDay, weekRows, weekStart } from './hours';
@@ -301,17 +301,28 @@ const TABS: [Tab, string][] = [['now', t.tabNow], ['week', t.tabWeek], ['sites',
 
 export default function Boss({ session, onLogout }: { session: Session; onLogout: () => void }) {
   const [d, setD] = useState<D>();
+  const [failed, setFailed] = useState(false);
   const [tab, setTab] = useState<Tab>('now');
   const code = session.teamCode;
+  const alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   const reload = useCallback(async () => {
-    await data.sweep(code);
-    const from = Math.min(weekStart(-8), startOfDay(Date.now()) - 2 * DAY);
-    const [team, workers, sites, punches, audit, corr, appr] = await Promise.all([
-      data.getTeam(code), data.listWorkers(code), data.listSites(code), data.listPunches(code, from, Date.now() + DAY),
-      data.listAudit(code), data.listCorrections(code), data.listApprovals(code),
-    ]);
-    setD({ team, workers, sites, punches, audit, corr, appr });
-  }, [code]);
+    try {
+      await data.sweep(code).catch(() => 0); // a failed sweep must not hide the data
+      const from = Math.min(weekStart(-8), startOfDay(Date.now()) - 2 * DAY);
+      const [team, workers, sites, punches, audit, corr, appr] = await Promise.all([
+        data.getTeam(code), data.listWorkers(code), data.listSites(code), data.listPunches(code, from, Date.now() + DAY),
+        data.listAudit(code), data.listCorrections(code), data.listApprovals(code),
+      ]);
+      if (!alive.current) return;
+      setD({ team, workers, sites, punches, audit, corr, appr });
+      setFailed(false);
+    } catch (e) {
+      if (!alive.current) return;
+      if (e instanceof Error && (e.message === 'code' || e.message === 'notfound')) { onLogout(); return; } // team no longer exists on this device
+      setFailed(true);
+    }
+  }, [code, onLogout]);
   useEffect(() => { reload(); const id = setInterval(reload, 15_000); return () => clearInterval(id); }, [reload]);
 
   const todo = d ? d.workers.filter((w) => w.status === 'pending').length + d.corr.filter((c) => c.status === 'pending').length : 0;
@@ -319,13 +330,13 @@ export default function Boss({ session, onLogout }: { session: Session; onLogout
   return (
     <View style={{ flex: 1 }}>
       <View style={[st.rowBetween, { paddingHorizontal: S.md, paddingTop: 52, paddingBottom: S.sm }]}>
-        <Text style={[st.title, { flexShrink: 1 }]} numberOfLines={1}>{session.name}</Text>
+        <Text style={[st.title, { flexShrink: 1 }]} numberOfLines={2}>{session.name}</Text>
         <Btn label={t.logout} small ghost onPress={onLogout} />
       </View>
       <View style={{ paddingHorizontal: S.md }}><SyncBar refresh={reload} /></View>
       <Transition k={tab}>
         <ScrollView contentContainerStyle={[st.body, { paddingTop: S.sm }]} keyboardShouldPersistTaps="handled">
-          {!p ? <Skeleton n={4} /> : tab === 'now' ? <NowTab d={p.d} go={setTab} /> : tab === 'week' ? <WeekTab {...p} /> : tab === 'sites' ? <SitesTab {...p} /> : tab === 'todo' ? <TodoTab {...p} /> : <SettingsTab {...p} />}
+          {!p ? (failed ? <Card><Text style={st.muted}>{t.loadFail}</Text><Btn label={t.retry} onPress={reload} /></Card> : <Skeleton n={4} />) : tab === 'now' ? <NowTab d={p.d} go={setTab} /> : tab === 'week' ? <WeekTab {...p} /> : tab === 'sites' ? <SitesTab {...p} /> : tab === 'todo' ? <TodoTab {...p} /> : <SettingsTab {...p} />}
         </ScrollView>
       </Transition>
       <View style={{ flexDirection: 'row', backgroundColor: '#fff', borderTopWidth: 1, borderColor: C.line, paddingBottom: 12 }}>

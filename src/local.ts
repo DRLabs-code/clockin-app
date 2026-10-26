@@ -48,7 +48,17 @@ export function createLocal(kv: KV, isOnline: () => Promise<boolean>): DataSourc
   };
 
   return {
-    getSession: async () => JSON.parse((await kv.get('clockin.session')) ?? 'null'),
+    // A session left by an older build / wiped DB must not log in to a team that no longer exists.
+    getSession: async () => {
+      let s: Session | null = null;
+      try { s = JSON.parse((await kv.get('clockin.session')) ?? 'null'); } catch { s = null; }
+      if (!s) return null;
+      const db = await load().catch(() => empty());
+      const ok = db.teams.some((x) => x.code === s!.teamCode) && (s.role === 'boss' || (s.role === 'worker' && db.workers.some((w) => w.id === s!.workerId && w.teamCode === s!.teamCode)));
+      if (ok) return s;
+      await kv.del('clockin.session');
+      return null;
+    },
     clearSession: () => kv.del('clockin.session'),
 
     createTeam: (name, pin) =>

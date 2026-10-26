@@ -140,3 +140,19 @@ test('offline queue, sync, sweep, edits+audit+lock, corrections', async () => {
   await d.setApproval('boss', c, w, ws, false);
   assert.equal(await code(d.updatePunch('boss', pin.id, { ts: T0 + MIN }, 'x')), 'ok');
 });
+
+test('getSession drops a stale session (team missing on this device) and survives corrupt data', async () => {
+  const m = mem();
+  const d = createLocal(m, async () => true);
+  await m.set('clockin.session', JSON.stringify({ role: 'boss', teamCode: '123456', name: 'old' }));
+  assert.equal(await d.getSession(), null);
+  assert.equal(await m.get('clockin.session'), null); // cleared, so the next start shows the login screen
+  await m.set('clockin.session', '{not json');
+  assert.equal(await d.getSession(), null);
+  const s = await d.createTeam('T', '1234');
+  assert.equal((await d.getSession())?.teamCode, s.teamCode);
+  const w = await d.joinTeam(s.teamCode, 'A', '1111');
+  assert.equal((await d.getSession())?.workerId, w.workerId);
+  await m.set('clockin.session', JSON.stringify({ role: 'worker', teamCode: s.teamCode, name: 'X', workerId: 'ghost' }));
+  assert.equal(await d.getSession(), null);
+});
