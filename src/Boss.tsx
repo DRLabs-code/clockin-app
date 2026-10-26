@@ -4,7 +4,7 @@ import { data, Punch, Session, Team, Worker } from './data';
 import { DAY, isOnSite, startOfDay, weekMinutes, weekStart } from './hours';
 import { Row, shareCsv, toCsv } from './export';
 import { t } from './i18n';
-import { Btn, C, s } from './ui';
+import { Btn, C, Loc, s } from './ui';
 
 export default function Boss({ session, onLogout }: { session: Session; onLogout: () => void }) {
   const [team, setTeam] = useState<Team>();
@@ -36,6 +36,8 @@ export default function Boss({ session, onLogout }: { session: Session; onLogout
     const days = weekMinutes(mine(w), team?.breakMinutes ?? 30, ws);
     return { name: w.name, days, total: days.reduce((a, b) => a + b, 0) };
   });
+  const weekPunches = punches.filter((p) => p.ts >= ws && p.ts < ws + 7 * DAY).sort((a, b) => b.ts - a.ts);
+  const nameOf = (id: string) => workers.find((w) => w.id === id)?.name ?? '';
   const fmtDay = (i: number) => {
     const d = new Date(ws + i * DAY + 3_600_000);
     return `${d.getMonth() + 1}/${d.getDate()}`;
@@ -56,10 +58,15 @@ export default function Boss({ session, onLogout }: { session: Session; onLogout
       {workers.length === 0 && <Text style={s.muted}>{t.noWorkers}</Text>}
       {workers.map((w) => {
         const on = isOnSite(mine(w));
+        const last = [...mine(w)].sort((a, b) => b.ts - a.ts)[0];
         return (
-          <View key={w.id} style={[s.card, s.row]}>
-            <Text style={{ fontSize: 18 }}>{w.name}</Text>
-            <Text style={{ color: on ? C.green : C.gray, fontWeight: '600' }}>{on ? `● ${t.onSite}` : t.offDuty}</Text>
+          <View key={w.id} style={s.card}>
+            <View style={s.row}>
+              <Text style={{ fontSize: 18 }}>{w.name}</Text>
+              <Text style={{ color: on ? C.green : C.gray, fontWeight: '600' }}>{on ? `● ${t.onSite}` : t.offDuty}</Text>
+            </View>
+            {last && <Text style={[s.muted, { marginTop: 6 }]}>{t.lastPunch}：{last.type === 'in' ? t.clockIn : t.clockOut} {new Date(last.ts).toLocaleString()}</Text>}
+            {last && <Loc lat={last.lat} lng={last.lng} />}
           </View>
         );
       })}
@@ -91,6 +98,14 @@ export default function Boss({ session, onLogout }: { session: Session; onLogout
           </View>
         ))}
       </View>
+      <Text style={s.h2}>{t.records}</Text>
+      {weekPunches.length === 0 && <Text style={s.muted}>-</Text>}
+      {weekPunches.map((p) => (
+        <View key={p.id} style={s.card}>
+          <Text>{nameOf(p.workerId)} · {p.type === 'in' ? t.clockIn : t.clockOut} · {new Date(p.ts).toLocaleString()}</Text>
+          <Loc lat={p.lat} lng={p.lng} />
+        </View>
+      ))}
       <Btn label={t.export} color={C.green} onPress={() => shareCsv(toCsv(rows, ws), ws)} />
     </ScrollView>
   );

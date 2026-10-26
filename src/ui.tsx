@@ -1,4 +1,6 @@
-import { Pressable, StyleSheet, Text, ViewStyle } from 'react-native';
+import { Linking, Pressable, StyleSheet, Text, ViewStyle } from 'react-native';
+import { mapUrl } from './location';
+import { t } from './i18n';
 
 export const C = { green: '#16a34a', red: '#dc2626', blue: '#2563eb', gray: '#6b7280', bg: '#f3f4f6' };
 
@@ -6,6 +8,15 @@ export function Btn({ label, onPress, color = C.blue, style }: { label: string; 
   return (
     <Pressable onPress={onPress} style={[s.btn, { backgroundColor: color }, style]}>
       <Text style={s.btnText}>{label}</Text>
+    </Pressable>
+  );
+}
+
+export function Loc({ lat, lng, label }: { lat?: number; lng?: number; label?: boolean }) {
+  if (lat == null || lng == null) return <Text style={{ color: C.gray }}>{label ? '📍 ' : ''}{t.noLocation}</Text>;
+  return (
+    <Pressable onPress={() => Linking.openURL(mapUrl(lat, lng))}>
+      <Text style={{ color: C.blue }}>📍 {lat.toFixed(5)}, {lng.toFixed(5)} · {t.openMap}</Text>
     </Pressable>
   );
 }

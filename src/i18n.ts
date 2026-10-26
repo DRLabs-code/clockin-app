@@ -33,6 +33,11 @@ const zh = {
   errCode: '团队码不存在',
   errInput: '请填写完整信息',
   codeHint: '6 位数字团队码',
+  records: '打卡记录',
+  noGps: '未获取到定位，已无GPS记录打卡',
+  noLocation: '无定位',
+  openMap: '打开地图',
+  locating: '定位中…',
   shareTitle: '导出工时表',
 };
 export const t = zh;

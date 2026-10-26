@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, Switch, Text, View } from 'react-native';
-import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
 import NetInfo from '@react-native-community/netinfo';
 import { data, Punch, Session } from './data';
 import { DAY, isOnSite, shiftsOf, startOfDay } from './hours';
 import { t } from './i18n';
-import { Btn, C, s } from './ui';
+import { getFix } from './location';
+import { Btn, C, Loc, s } from './ui';
 
 export default function WorkerScreen({ session, onLogout }: { session: Session; onLogout: () => void }) {
   const [punches, setPunches] = useState<Punch[]>([]);
@@ -14,6 +14,7 @@ export default function WorkerScreen({ session, onLogout }: { session: Session; 
   const [pending, setPending] = useState(0);
   const [photo, setPhoto] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState('');
   const [, tick] = useState(0);
 
   const load = useCallback(async () => {
@@ -57,14 +58,10 @@ export default function WorkerScreen({ session, onLogout }: { session: Session; 
         if (r.canceled) return;
         photoUri = r.assets[0].uri;
       }
-      let lat: number | undefined, lng: number | undefined;
-      try {
-        if ((await Location.requestForegroundPermissionsAsync()).granted) {
-          const p = (await Location.getLastKnownPositionAsync()) ?? (await Location.getCurrentPositionAsync({}));
-          lat = p.coords.latitude;
-          lng = p.coords.longitude;
-        }
-      } catch {} // no GPS fix: still record the punch
+      setNotice(t.locating);
+      const fix = await getFix();
+      const lat = fix?.lat, lng = fix?.lng;
+      setNotice(fix ? '' : t.noGps);
       await data.addPunch({
         teamCode: session.teamCode,
         workerId: session.workerId!,
@@ -76,6 +73,7 @@ export default function WorkerScreen({ session, onLogout }: { session: Session; 
       });
       await sync();
     } catch (e) {
+      setNotice('');
       Alert.alert(String(e));
     } finally {
       setBusy(false);
@@ -95,6 +93,7 @@ export default function WorkerScreen({ session, onLogout }: { session: Session; 
         style={{ backgroundColor: on ? C.red : C.green, borderRadius: 120, height: 240, width: 240, alignSelf: 'center', alignItems: 'center', justifyContent: 'center', opacity: busy ? 0.5 : 1 }}>
         <Text style={{ color: '#fff', fontSize: 34, fontWeight: '700' }}>{on ? t.clockOut : t.clockIn}</Text>
       </Pressable>
+      {!!notice && <Text style={{ textAlign: 'center', color: notice === t.noGps ? C.red : C.gray }}>{notice}</Text>}
       <View style={s.row}>
         <Text style={{ fontSize: 16 }}>{t.takePhoto}</Text>
         <Switch value={photo} onValueChange={setPhoto} />
@@ -103,6 +102,7 @@ export default function WorkerScreen({ session, onLogout }: { session: Session; 
         <Text style={s.muted}>{t.todayHours}</Text>
         <Text style={{ fontSize: 30, fontWeight: '700' }}>{t.hm(minutes)}</Text>
         {last && <Text style={s.muted}>{t.lastPunch}：{last.type === 'in' ? t.clockIn : t.clockOut} {new Date(last.ts).toLocaleString()}</Text>}
+        {last && <Loc lat={last.lat} lng={last.lng} label />}
       </View>
       <View style={s.row}>
         <Text style={s.muted}>{pending ? t.pending(pending) : t.synced}</Text>
