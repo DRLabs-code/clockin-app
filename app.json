@@ -1,0 +1,45 @@
+{
+  "expo": {
+    "name": "工地打卡",
+    "slug": "clockin-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.example.clockin"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "com.example.clockin"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-sharing",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "打卡时需要记录你的位置"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "打卡时可拍照留证"
+        }
+      ]
+    ],
+    "experiments": {
+      "baseUrl": "/clockin-app"
+    }
+  }
+}
