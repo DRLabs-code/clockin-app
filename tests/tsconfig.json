@@ -1,0 +1,5 @@
+{
+  "compilerOptions": { "module": "nodenext", "target": "es2022", "strict": true, "outDir": "../.tests-out", "rootDir": "..", "skipLibCheck": true, "types": ["node"] },
+  "include": ["./*.ts", "../src/hours.ts", "../src/local.ts", "../src/data.ts"],
+  "exclude": ["../src/data.ts"]
+}

@@ -1,24 +1,29 @@
-# 工地打卡（原型）
+# 工地打卡（v1，本地版）
 
-给澳洲小包工头和工人用的打卡 App：Expo (React Native + TypeScript)，同时支持 iOS / Android。界面为简体中文，文案集中在 `src/i18n.ts`，以后加英文只需新增一份同结构的词典。
+给澳洲小包工头和工人用的打卡 App：Expo (React Native + TypeScript)，iOS / Android / 网页。界面为简体中文，文案集中在 `src/i18n.ts`（以后加英文：按同结构新增一份词典）。
 
 ## 运行
 ```bash
 npm install
-npx expo start
+npx expo start          # 手机装 Expo Go 扫码
+npx expo export --platform web   # 网页版 → dist/（baseUrl /clockin-app）
+npm run typecheck       # tsc
+npm test                # 逻辑单元测试（班次配对、自动关班、休息、加入审批、审计、锁定等）
 ```
-用手机装 **Expo Go**，扫描终端里的二维码即可（iOS 用相机扫，Android 用 Expo Go 内扫码）。
-网页预览：`npx expo export --platform web`，产物在 `dist/`（用 `npx serve dist` 打开）。
-类型检查：`npx tsc --noEmit`。需要 Node ≥ 22.13（Node 20 能跑，但会有警告）。
+需要 Node ≥ 22.13（Node 20 能跑，有警告）。
 
 ## 功能
-- 首次启动选 **老板 / 工人**。老板创建团队得到 6 位团队码；工人输入团队码 + 姓名加入。
-- 工人：大按钮 上班/下班打卡，记录时间、GPS、可选拍照，显示今日工时。断网时先存在本机队列，联网自动同步。
-- 老板：工人列表（谁在岗）、周工时表（可翻周）、休息扣除设置（默认班次超过 5 小时扣 30 分钟）、导出 CSV（Excel 可直接打开）。
+- 账号：老板创建团队并设 4 位 PIN，可在本机团队列表里 PIN 重新登录；工人用「团队码 + 姓名 + 4 位 PIN」申请加入，每人独立 id，**老板批准后**才能打卡。
+- 工地：名称/地址/GPS 中心与半径；二维码（打印 / 分享链接）。工人扫码（手机相机打开网页版）自动选中工地，否则点选，默认上次工地。
+- 打卡：只在上班、下班各读一次 GPS，记为 在场 / 不在场 / 无定位，从不拦截；不做持续定位。
+- 忘记下班：超过设定小时（默认 12）自动关班并标记；超过提醒小时（默认 10）在 App 内提醒。
+- 更正：老板可改/补录/删除班次（必填原因，保留修改历史）；工人可提交更正申请由老板批准。
+- 休息：每班显示扣除规则与来源（规则 / 工人填写 / 老板调整）。
+- 离线：离线横幅、每条记录的同步状态。
+- 看板：现在在场、周工时表（每日 + 合计 + 每天超 X 小时）、按人批准整周（批准后锁定）、导出每班明细 CSV（可只含已批准）。
 
 ## 数据层
-UI 只通过 `src/data.ts` 的 `DataSource` 接口读写数据。目前是 AsyncStorage 本地实现，**数据只存在当前手机，老板和工人在不同手机上看不到彼此的数据**。
-接入 Supabase：按接口写一个 `DataSource` 实现（`addPunch` 先入本地队列，`sync()` 上传），把 `data.ts` 最后一行 `export const data` 换掉即可。表结构和行级安全草案见 `supabase/schema.sql`（现在不需要运行）。
+UI 只通过 `src/data.ts` 的 `DataSource` 接口读写；本地实现在 `src/local.ts`（AsyncStorage，**数据只在本机**，PIN 本地明文存放，上云时需服务端哈希和限次）。规则（审批、锁定、审计、原因必填）都在接口之后，换成 Supabase 实现即可。`supabase/schema.sql` 是旧草案，需按新模型（sites、audit、join、corrections、approvals）更新。
 
 ## 未做
-真正的多手机同步、登录/防作弊（定位围栏、防改时间）、照片上传、后台定位、App 商店打包（`eas build`）。
+真机后台提醒推送（现为 App 内横幅）、App 内相机扫码（现用手机相机 + 网页链接）、照片上传、云同步、award 计薪、定位同意存档。

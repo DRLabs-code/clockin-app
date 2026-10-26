@@ -1,134 +1,88 @@
 // Single data-layer interface. The UI only imports `data` from here.
 // To switch to Supabase: implement `DataSource` (see supabase/schema.sql) and change the last line.
+// All business rules (auth, approval, locking, audit) live behind this interface so a server can enforce them.
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
+import { createLocal } from './local';
 
 export type Role = 'boss' | 'worker';
-export type Team = { code: string; name: string; breakMinutes: number };
-export type Worker = { id: string; teamCode: string; name: string };
+export type Geo = 'on' | 'off' | 'none'; // 在场 / 不在场 / 无定位
+export type Status = 'pending' | 'approved' | 'rejected';
+
+export type Settings = {
+  breakMinutes: number; // deducted from shifts longer than 5h
+  overtimeHours: number; // daily "over X h" threshold
+  autoCloseHours: number; // forgotten clock-out is closed after this long
+  remindHours: number; // in-app reminder to worker after this long
+};
+export type Team = Settings & { code: string; name: string };
+export type Worker = { id: string; teamCode: string; name: string; status: Status; createdAt: number };
+export type Site = { id: string; teamCode: string; name: string; address?: string; lat?: number; lng?: number; radius: number };
 export type Punch = {
   id: string;
   teamCode: string;
   workerId: string;
+  siteId?: string;
   type: 'in' | 'out';
-  ts: number; // epoch ms
+  ts: number; // device time of the tap (or the corrected time)
+  receivedTs?: number; // when "the server" got it (differs from ts when offline)
   lat?: number;
   lng?: number;
+  geo: Geo;
   photoUri?: string;
+  source: 'self' | 'boss' | 'auto';
+  breakMin?: number; // 'out' punch: worker-entered break
+  breakOverride?: number; // 'in' punch: boss override for the whole shift
   synced: boolean;
 };
-export type NewPunch = Omit<Punch, 'id' | 'synced'>;
+export type NewPunch = Omit<Punch, 'id' | 'synced' | 'receivedTs'>;
+export type Audit = { id: string; teamCode: string; punchId: string; workerId: string; by: string; at: number; action: 'add' | 'edit' | 'delete' | 'auto'; before?: Partial<Punch>; after?: Partial<Punch>; reason: string };
+export type Correction = { id: string; teamCode: string; workerId: string; inId: string; outId: string | null; newIn: number; newOut?: number; reason: string; status: Status; createdAt: number };
+export type Approval = { teamCode: string; workerId: string; weekStart: number; by: string; at: number };
+/** Worker may have a pending/rejected status; the UI shows a waiting screen until approved. */
 export type Session = { role: Role; teamCode: string; name: string; workerId?: string };
+
+/** Errors thrown by DataSource carry one of these codes in `message`. */
+export type ErrCode = 'code' | 'pin' | 'dup' | 'status' | 'locked' | 'reason' | 'notfound';
 
 export interface DataSource {
   getSession(): Promise<Session | null>;
   clearSession(): Promise<void>;
-  createTeam(teamName: string): Promise<Session>;
-  joinTeam(code: string, workerName: string): Promise<Session>; // throws Error('code') if unknown
+  createTeam(teamName: string, pin: string): Promise<Session>;
+  listTeams(): Promise<{ code: string; name: string }[]>; // teams the boss can reopen on this device
+  loginBoss(code: string, pin: string): Promise<Session>; // throws 'pin' | 'code'
+  /** Creates a NEW pending worker (never reuses a name). Throws 'code' | 'dup' (same name + PIN). */
+  joinTeam(code: string, workerName: string, pin: string): Promise<Session>;
+  loginWorker(code: string, workerName: string, pin: string): Promise<Session>; // throws 'pin' | 'code'
   getTeam(code: string): Promise<Team>;
-  setBreakMinutes(code: string, minutes: number): Promise<void>;
+  updateSettings(code: string, patch: Partial<Settings>): Promise<void>;
   listWorkers(code: string): Promise<Worker[]>;
-  /** Never blocks on network: stored locally first, uploaded by sync(). */
+  decideWorker(workerId: string, approve: boolean): Promise<void>;
+  listSites(code: string): Promise<Site[]>;
+  saveSite(site: Omit<Site, 'id'> & { id?: string }): Promise<Site>;
+  deleteSite(id: string): Promise<void>;
+  /** Worker tap. Never blocks on network: stored locally first (synced=false), uploaded by sync(). Throws 'status' unless worker is approved. */
   addPunch(p: NewPunch): Promise<Punch>;
+  /** Boss-only changes; all require a reason, keep an audit entry, and throw 'locked' if that worker's week is approved. */
+  addPunchAs(by: string, p: NewPunch, reason: string): Promise<Punch>;
+  updatePunch(by: string, id: string, patch: Partial<Pick<Punch, 'ts' | 'siteId' | 'breakMin' | 'breakOverride'>>, reason: string): Promise<void>;
+  deletePunch(by: string, id: string, reason: string): Promise<void>;
   /** Includes not-yet-synced punches. from <= ts < to. */
   listPunches(code: string, from: number, to: number): Promise<Punch[]>;
+  listAudit(code: string): Promise<Audit[]>;
+  /** Closes shifts left open longer than autoCloseHours. Returns how many were closed. */
+  sweep(code: string, now?: number): Promise<number>;
+  requestCorrection(c: Pick<Correction, 'teamCode' | 'workerId' | 'inId' | 'outId' | 'newIn' | 'newOut' | 'reason'>): Promise<void>;
+  listCorrections(code: string): Promise<Correction[]>;
+  decideCorrection(by: string, id: string, approve: boolean): Promise<void>; // approve applies the change (audited)
+  listApprovals(code: string): Promise<Approval[]>;
+  setApproval(by: string, code: string, workerId: string, weekStart: number, on: boolean): Promise<void>;
   pendingCount(): Promise<number>;
   /** Upload queued punches if online. */
   sync(): Promise<void>;
 }
 
-type DB = { teams: Team[]; workers: Worker[]; punches: Punch[] };
-const K = { db: 'clockin.db', queue: 'clockin.queue', session: 'clockin.session' };
-const read = async <T>(k: string, d: T): Promise<T> => JSON.parse((await AsyncStorage.getItem(k)) ?? 'null') ?? d;
-const write = (k: string, v: unknown) => AsyncStorage.setItem(k, JSON.stringify(v));
-const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-
-let lock: Promise<unknown> = Promise.resolve();
-const serial = <T>(f: () => Promise<T>): Promise<T> => {
-  const r = lock.then(f, f);
-  lock = r.catch(() => {});
-  return r;
-};
-
-// Local implementation: "server" DB and the offline queue both live in AsyncStorage on this device.
-// Data is therefore NOT shared between phones until a remote implementation replaces it.
-const local: DataSource = {
-  getSession: () => read<Session | null>(K.session, null),
-  clearSession: () => AsyncStorage.removeItem(K.session),
-
-  createTeam: (name) =>
-    serial(async () => {
-      const db = await read<DB>(K.db, { teams: [], workers: [], punches: [] });
-      let code: string;
-      do code = String(Math.floor(100000 + Math.random() * 900000));
-      while (db.teams.some((x) => x.code === code));
-      db.teams.push({ code, name, breakMinutes: 30 });
-      await write(K.db, db);
-      const s: Session = { role: 'boss', teamCode: code, name };
-      await write(K.session, s);
-      return s;
-    }),
-
-  joinTeam: (code, name) =>
-    serial(async () => {
-      const db = await read<DB>(K.db, { teams: [], workers: [], punches: [] });
-      if (!db.teams.some((x) => x.code === code)) throw new Error('code');
-      let w = db.workers.find((x) => x.teamCode === code && x.name === name);
-      if (!w) {
-        w = { id: uid(), teamCode: code, name };
-        db.workers.push(w);
-        await write(K.db, db);
-      }
-      const s: Session = { role: 'worker', teamCode: code, name, workerId: w.id };
-      await write(K.session, s);
-      return s;
-    }),
-
-  getTeam: async (code) => {
-    const db = await read<DB>(K.db, { teams: [], workers: [], punches: [] });
-    const t = db.teams.find((x) => x.code === code);
-    if (!t) throw new Error('code');
-    return t;
-  },
-
-  setBreakMinutes: (code, minutes) =>
-    serial(async () => {
-      const db = await read<DB>(K.db, { teams: [], workers: [], punches: [] });
-      const t = db.teams.find((x) => x.code === code);
-      if (t) t.breakMinutes = minutes;
-      await write(K.db, db);
-    }),
-
-  listWorkers: async (code) =>
-    (await read<DB>(K.db, { teams: [], workers: [], punches: [] })).workers.filter((w) => w.teamCode === code),
-
-  addPunch: (p) =>
-    serial(async () => {
-      const q = await read<Punch[]>(K.queue, []);
-      const punch: Punch = { ...p, id: uid(), synced: false };
-      q.push(punch);
-      await write(K.queue, q);
-      return punch;
-    }),
-
-  listPunches: async (code, from, to) => {
-    const db = await read<DB>(K.db, { teams: [], workers: [], punches: [] });
-    const q = await read<Punch[]>(K.queue, []);
-    return [...db.punches, ...q].filter((p) => p.teamCode === code && p.ts >= from && p.ts < to);
-  },
-
-  pendingCount: async () => (await read<Punch[]>(K.queue, [])).length,
-
-  sync: () =>
-    serial(async () => {
-      if ((await NetInfo.fetch()).isConnected === false) return;
-      const q = await read<Punch[]>(K.queue, []);
-      if (!q.length) return;
-      const db = await read<DB>(K.db, { teams: [], workers: [], punches: [] });
-      db.punches.push(...q.map((p) => ({ ...p, synced: true })));
-      await write(K.db, db);
-      await write(K.queue, []);
-    }),
-};
-
-export const data: DataSource = local;
+export const data: DataSource = createLocal(
+  { get: (k) => AsyncStorage.getItem(k), set: (k, v) => AsyncStorage.setItem(k, v), del: (k) => AsyncStorage.removeItem(k) },
+  async () => (await NetInfo.fetch()).isConnected !== false,
+);

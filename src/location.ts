@@ -13,7 +13,7 @@ const withTimeout = <T>(p: Promise<T>, ms: number): Promise<T | undefined> =>
     );
   });
 
-/** Never throws, never hangs longer than ~8s. Returns undefined when there is no fix. */
+/** One-shot fix (no tracking). Never throws, never hangs longer than ~8s. Returns undefined when there is no fix. */
 export async function getFix(): Promise<Fix | undefined> {
   if (Platform.OS === 'web') {
     if (typeof navigator === 'undefined' || !navigator.geolocation) return undefined;
@@ -22,13 +22,13 @@ export async function getFix(): Promise<Fix | undefined> {
       navigator.geolocation.getCurrentPosition(
         (p) => { clearTimeout(id); resolve({ lat: p.coords.latitude, lng: p.coords.longitude }); },
         () => { clearTimeout(id); resolve(undefined); },
-        { enableHighAccuracy: true, timeout: TIMEOUT, maximumAge: 60000 },
+        { enableHighAccuracy: true, timeout: TIMEOUT, maximumAge: 15000 },
       );
     });
   }
   const run = async (): Promise<Fix | undefined> => {
     if (!(await Location.requestForegroundPermissionsAsync()).granted) return undefined;
-    const p = (await Location.getLastKnownPositionAsync()) ?? (await Location.getCurrentPositionAsync({}));
+    const p = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }); // fresh fix, never a stale cached one
     return { lat: p.coords.latitude, lng: p.coords.longitude };
   };
   return withTimeout(run(), TIMEOUT);
